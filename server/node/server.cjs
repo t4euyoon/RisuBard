@@ -953,7 +953,8 @@ app.use(express.json({ limit: '100mb' }));
 app.use((req, res, next) => {
     // Skip express.raw() for backup import — it must stream, not buffer into memory
     if (req.path === '/api/backup/import') return next();
-    const isChatUpload = req.path.startsWith('/api/chat-content-upload/');
+    const isChatUpload = req.path.startsWith('/api/chat-content-upload/')
+        || req.path === '/api/risubard/memory/save-slot/upload';
     // Fixed ceiling admits older in-flight uploads after the app changes its setting.
     // The staging store validates each request against that upload's chosen size.
     const limit = isChatUpload ? CHAT_UPLOAD_MAX_CHUNK_BYTES : '2gb';
@@ -3970,6 +3971,7 @@ const narrativeMemoryService = createRuntimeMemoryService(savePath);
 registerRisuBardMemoryRoutes(app, {
     auth: checkAuth,
     service: narrativeMemoryService,
+    uploads: chatContentUploads,
 });
 
 app.post('/api/write', async (req, res, next) => {

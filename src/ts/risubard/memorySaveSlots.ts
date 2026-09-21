@@ -1,5 +1,6 @@
 import type { Chat, Message } from '../storage/database.svelte'
 import { Packr, Unpackr } from 'msgpackr/index-no-eval'
+import { uploadBinaryContent } from '../storage/chatContentUpload'
 import { invokeBrowserFetch } from './browserFetch'
 
 const chatPacker = new Packr({ useRecords: false })
@@ -179,10 +180,6 @@ function applyMemorySavePromptSettings(chat: Chat, currentChat?: Chat): void {
     if (legacyToggles) chat.useLocallySetGlobalVariables = true
 }
 
-function requestBody(bytes: Uint8Array): ArrayBuffer {
-    return Uint8Array.from(bytes).buffer
-}
-
 async function withMemorySaveTimeout<T>(
     operation: (signal: AbortSignal) => Promise<T>
 ): Promise<T> {
@@ -213,6 +210,8 @@ export async function createMemorySaveSlot(input: {
     chat: Chat
     saveId: string
     overwrite?: boolean
+    chunkEnabled?: boolean
+    chunkMiB?: number
     fetchImpl: typeof fetch
     createAuth(): Promise<string>
 }): Promise<MemorySaveSlotSummary> {
@@ -230,35 +229,38 @@ export async function createMemorySaveSlot(input: {
     snapshot.isStreaming = false
     delete snapshot.activeStreamingDisplayOptimizationMode
     const latestMessageId = latestChatMessageId(snapshot.message)
-    const response = await withMemorySaveTimeout(async (signal) =>
-        invokeBrowserFetch(
-            input.fetchImpl,
-            '/api/risubard/memory/save-slot',
-            {
-                method: 'POST',
+    const bytes = encodeMemorySaveChat(snapshot)
+    const response = await withMemorySaveTimeout(async (signal) => {
+        const headers = {
+            'content-type': 'application/octet-stream',
+            'x-risubard-character-id': characterId,
+            'x-risubard-source-chat-id': sourceChatId,
+            'x-risubard-save-id': saveId,
+            ...(input.overwrite
+                ? { 'x-risubard-save-overwrite': 'true' }
+                : {}),
+            'x-risubard-chat-name': encodeBase64Url(snapshot.name),
+            'x-risubard-turn-count': String(
+                countChatTurns(snapshot.message)
+            ),
+            ...(latestMessageId ? {
+                'x-risubard-latest-message-id': latestMessageId,
+            } : {}),
+        }
+        return uploadBinaryContent(
+            async (url, init) => invokeBrowserFetch(input.fetchImpl, url, {
+                ...init,
                 credentials: 'same-origin',
-                headers: {
-                    'content-type': 'application/octet-stream',
-                    'risu-auth': await input.createAuth(),
-                    'x-risubard-character-id': characterId,
-                    'x-risubard-source-chat-id': sourceChatId,
-                    'x-risubard-save-id': saveId,
-                    ...(input.overwrite
-                        ? { 'x-risubard-save-overwrite': 'true' }
-                        : {}),
-                    'x-risubard-chat-name': encodeBase64Url(snapshot.name),
-                    'x-risubard-turn-count': String(
-                        countChatTurns(snapshot.message)
-                    ),
-                    ...(latestMessageId ? {
-                        'x-risubard-latest-message-id': latestMessageId,
-                    } : {}),
-                },
-                body: requestBody(encodeMemorySaveChat(snapshot)),
-                signal,
-            }
+                body: init.body ? Uint8Array.from(init.body as Uint8Array).buffer : undefined,
+                headers: { ...init.headers, 'risu-auth': await input.createAuth() },
+                // Cleanup must still work after the upload timeout aborts.
+                signal: init.method === 'DELETE' ? AbortSignal.timeout(10_000) : signal,
+            }),
+            '/api/risubard/memory/save-slot',
+            '/api/risubard/memory/save-slot/upload',
+            headers, bytes, input.chunkMiB, input.chunkEnabled === true,
         )
-    )
+    })
     if (!response.ok) {
         throw new Error(
             `Memory save failed with status ${response.status}`

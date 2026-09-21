@@ -10,18 +10,29 @@ export async function uploadChatContent(
     chunkMiB: unknown = DEFAULT_CHAT_UPLOAD_CHUNK_MIB,
     enabled = false,
 ): Promise<Response> {
-    // Snapshot once: changing settings must not resize an upload already in flight.
-    const chunkBytes = normalizeChatUploadChunkMiB(chunkMiB) * 1024 * 1024
     const suffix = `${encodeURIComponent(chaId)}/${chatIndex}`
-    const headers = { 'content-type': 'application/octet-stream', 'x-chat-id': chatId }
+    return uploadBinaryContent(request, `/api/chat-content/${suffix}`,
+        `/api/chat-content-upload/${suffix}`,
+        { 'content-type': 'application/octet-stream', 'x-chat-id': chatId },
+        encoded, chunkMiB, enabled)
+}
+
+/** Shared bounded transport for chat content and memory save snapshots. */
+export async function uploadBinaryContent(
+    request: (url: string, init: RequestInit) => Promise<Response>,
+    directUrl: string, uploadUrl: string, headers: Record<string, string>,
+    encoded: Uint8Array, chunkMiB: unknown = DEFAULT_CHAT_UPLOAD_CHUNK_MIB,
+    enabled = false,
+): Promise<Response> {
+    const chunkBytes = normalizeChatUploadChunkMiB(chunkMiB) * 1024 * 1024
     if (!enabled || encoded.byteLength <= chunkBytes) {
-        return request(`/api/chat-content/${suffix}`, {
+        return request(directUrl, {
             method: 'POST', headers, body: encoded as BodyInit,
         })
     }
 
     const uploadId = uuidv4()
-    const url = `/api/chat-content-upload/${suffix}`
+    const url = uploadUrl
     let committed = false
     try {
         for (let offset = 0, index = 0; offset < encoded.byteLength; offset += chunkBytes, index++) {
@@ -51,7 +62,7 @@ export async function uploadChatContent(
     } finally {
         if (!committed) {
             // Do not mask the save/conflict error if the network is unavailable.
-            await request(url, { method: 'DELETE', headers: { 'x-chat-id': chatId, 'x-upload-id': uploadId } }).catch(() => {})
+            await request(url, { method: 'DELETE', headers: { ...headers, 'x-upload-id': uploadId } }).catch(() => {})
         }
     }
 }

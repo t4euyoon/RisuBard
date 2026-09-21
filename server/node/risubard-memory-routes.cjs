@@ -180,7 +180,22 @@ function decodeBoundedHeaderText(value) {
 }
 
 function registerRisuBardMemoryRoutes(app, options) {
-    app.post('/api/risubard/memory/save-slot', async (req, res, next) => {
+    // Bind chunks to the destination and all snapshot metadata, isolated from chat uploads.
+    function stagingRequest(req) {
+        const names = ['x-risubard-character-id', 'x-risubard-source-chat-id',
+            'x-risubard-save-id', 'x-risubard-save-overwrite',
+            'x-risubard-chat-name', 'x-risubard-turn-count',
+            'x-risubard-latest-message-id']
+        return {
+            body: req.body,
+            headers: { ...req.headers,
+                'x-session-id': requestHeader(req, 'x-upload-id'),
+                'x-chat-id': requestHeader(req, 'x-risubard-source-chat-id') },
+            params: { chaId: 'memory-save-slot',
+                chatIndex: JSON.stringify(names.map(name => requestHeader(req, name))) },
+        }
+    }
+    async function saveSlot(req, res, next, chunked = false) {
         try {
             if (!await options.auth(req, res)) return
             const characterId = requestHeader(
@@ -211,9 +226,14 @@ function registerRisuBardMemoryRoutes(app, options) {
                     && !hasBoundedId(latestMessageId))
                 || !Buffer.isBuffer(req.body)
                 || req.body.byteLength === 0
-                || req.body.byteLength > 100 * 1024 * 1024) {
+                || req.body.byteLength > 2 * 1024 * 1024 * 1024) {
                 res.status(400).send({ error: 'Invalid memory save request' })
                 return
+            }
+            if (chunked) {
+                const result = await options.uploads.accept(stagingRequest(req))
+                if (!result.body) { res.send(result); return }
+                req.body = result.body
             }
             res.send(await options.service.createMemorySave({
                 characterId,
@@ -234,7 +254,19 @@ function registerRisuBardMemoryRoutes(app, options) {
             }
             next(error)
         }
-    })
+    }
+    app.post('/api/risubard/memory/save-slot', saveSlot)
+    if (options.uploads) {
+        app.post('/api/risubard/memory/save-slot/upload', (req, res, next) =>
+            saveSlot(req, res, next, true))
+        app.delete('/api/risubard/memory/save-slot/upload', async (req, res, next) => {
+            try {
+                if (!await options.auth(req, res)) return
+                await options.uploads.abort(stagingRequest(req))
+                res.send({ ok: true })
+            } catch (error) { next(error) }
+        })
+    }
 
     app.post('/api/risubard/memory/save-slot/list', async (req, res, next) => {
         try {

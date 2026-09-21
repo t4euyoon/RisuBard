@@ -69,6 +69,8 @@
                 chat,
                 saveId: saveId ?? v4(),
                 overwrite,
+                chunkEnabled: DBState.db.chatUploadChunkEnabled === true,
+                chunkMiB: DBState.db.chatUploadChunkMiB,
                 fetchImpl: fetch,
                 createAuth: () => forageStorage.createAuth(),
             })
