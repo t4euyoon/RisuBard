@@ -1,8 +1,8 @@
 import { helpKo } from "./help.ko";
 
 export const languageKorean = {
-    pluginBardWikiAutoContext: "BardWiki 문맥 자동 제공",
-    pluginBardWikiAutoContextHelp: "기본값은 꺼짐입니다. 켜면 이 플러그인이 캐릭터·채팅을 조회할 때 BardWiki 문맥을 추가하며, 검색 대기가 발생할 수 있습니다. 꺼도 플러그인의 명시적인 BardWiki 요청은 가능합니다.",
+    pluginBardWikiAutoContext: "플러그인 장기기억에 BardWiki 제공",
+    pluginBardWikiAutoContextHelp: "이 플러그인이 장기기억을 읽고, 그 장기기억으로 BardWiki 내용을 사용하려면 켜세요. 장기기억을 사용하지 않는 플러그인에서 켜면 불필요한 검색으로 성능이 저하될 수 있습니다. 기본값은 꺼짐입니다. 일반 채팅 요청에 포함되는 BardWiki 문맥에는 영향을 주지 않습니다.",
   cbsEditor: {
         logic: { OR: '또는', AND: '그리고', NOT: '아님' },
     on: '켜짐', off: '꺼짐',

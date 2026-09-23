@@ -1,8 +1,8 @@
 import { helpEn } from "./help.en";
 
 export const languageEnglish = {
-    pluginBardWikiAutoContext: "Automatically provide BardWiki context",
-    pluginBardWikiAutoContextHelp: "Off by default. Adds BardWiki context to this plugin’s character and chat reads. Enabling may add search latency. Explicit BardWiki requests still work when off.",
+    pluginBardWikiAutoContext: "Provide BardWiki as plugin long-term memory",
+    pluginBardWikiAutoContextHelp: "Enable this if the plugin reads long-term memory and you want it to use BardWiki content as that memory. Enabling it for a plugin that does not use long-term memory may reduce performance through unnecessary searches. Off by default. This does not affect BardWiki context included in normal chat requests.",
     cbsEditor: {
         logic: { OR: 'OR', AND: 'AND', NOT: 'NOT' },
         on: 'On', off: 'Off',
