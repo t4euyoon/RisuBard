@@ -14,6 +14,7 @@
     import SelectInput from "src/lib/UI/GUI/SelectInput.svelte";
     import OptionInput from "src/lib/UI/GUI/OptionInput.svelte";
     import CheckInput from "src/lib/UI/GUI/CheckInput.svelte";
+    import PluginBardWikiToggle from './PluginBardWikiToggle.svelte';
     import TextAreaInput from "src/lib/UI/GUI/TextAreaInput.svelte";
     import { hotReloadPluginFiles } from "src/ts/plugins/apiV3/developMode";
     import CollectionOrganizerList from "src/lib/UI/CollectionOrganizerList.svelte";
@@ -391,6 +392,9 @@
             </div>
             </div>
         </div>
+        {#if plugin.version === '3.0'}
+            <PluginBardWikiToggle {plugin} save={() => requestImmediateSave()} />
+        {/if}
         {#if plugin.version === 1}
             <ShAlert variant="warning" className="mt-2">
                 {language.pluginVersionWarn

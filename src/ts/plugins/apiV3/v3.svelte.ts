@@ -3,6 +3,7 @@ import { SandboxHost } from "./factory";
 import { getDatabase, normalizeChat } from "src/ts/storage/database.svelte";
 import { SafeLocalPluginStorage, tagWhitelist } from "../pluginSafeClass";
 import { bindPluginRequestStatusStorage } from "../providerRequestStatus";
+import { decoratePluginRead, pluginReceivesBardWiki } from "../pluginBardWikiPolicy";
 import { recordOwner, removeOwner, clearOwners } from "../pluginStorageMeta";
 import DOMPurify from 'dompurify';
 import { additionalChatMenu, additionalFloatingActionButtons, additionalHamburgerMenu, additionalSettingsMenu, bodyIntercepterStore, chatPanelStore, DBState, selectedCharID, type MenuDef } from "src/ts/stores.svelte";
@@ -814,8 +815,9 @@ const makeRisuaiAPIV3 = (iframe:HTMLIFrameElement,plugin:RisuPlugin) => {
             onError: warnBardWikiCompatibilityFailure,
         })
     }
+    const autoContextEnabled = () => pluginReceivesBardWiki(DBState.db.plugins ?? [], plugin.name)
     const getPluginCharacter = async () =>
-        decoratePluginCharacter(oldApis.getChar())
+        decoratePluginRead(oldApis.getChar(), autoContextEnabled(), decoratePluginCharacter)
     const setPluginCharacter = (character: any) =>
         oldApis.setChar(stripBardWikiVirtualMemoryFromCharacter(character))
     const getCurrentBardWikiScope = () => {
@@ -973,8 +975,8 @@ const makeRisuaiAPIV3 = (iframe:HTMLIFrameElement,plugin:RisuPlugin) => {
             const characters = (liteDB as any).characters
             const selectedId = get(selectedCharID)
             if (characters?.[selectedId]) {
-                characters[selectedId] = await decoratePluginCharacter(
-                    characters[selectedId]
+                characters[selectedId] = await decoratePluginRead(
+                    characters[selectedId], autoContextEnabled(), decoratePluginCharacter
                 )
             }
             return liteDB;
@@ -1072,8 +1074,8 @@ const makeRisuaiAPIV3 = (iframe:HTMLIFrameElement,plugin:RisuPlugin) => {
             const charIds = Object.keys(db.characters);
             const charId = charIds[index];
             if(charId){
-                return decoratePluginCharacter(
-                    $state.snapshot(db.characters[charId])
+                return decoratePluginRead(
+                    $state.snapshot(db.characters[charId]), autoContextEnabled(), decoratePluginCharacter
                 );
             }
             return null;
@@ -1095,9 +1097,9 @@ const makeRisuaiAPIV3 = (iframe:HTMLIFrameElement,plugin:RisuPlugin) => {
                 const character = db.characters[charId]
                 const chats = character.chats;
                 if(chats && chats[chatIndex]){
-                    return decoratePluginChat(
-                        character,
-                        $state.snapshot(chats[chatIndex])
+                    return decoratePluginRead(
+                        $state.snapshot(chats[chatIndex]), autoContextEnabled(),
+                        (chat) => decoratePluginChat(character, chat)
                     );
                 }
             }

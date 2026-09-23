@@ -16,6 +16,8 @@ import { PluginChatOutputListeners, V2_CHAT_OUTPUT_OWNER, createV2ChatOutputApi 
 import type { PluginProviderResponse, PluginProviderStructuredOutput } from './providerStructuredOutput';
 import { createPluginFetchLogging } from './pluginFetchLogging';
 
+import { preservePluginBardWikiSetting } from "./pluginBardWikiPolicy";
+
 export const customProviderStore = writable([] as string[])
 export const pluginProviderOwners = new Map<string, string>()
 
@@ -30,6 +32,7 @@ interface ProviderPlugin {
     argMeta: { [key: string]: {[key:string]:string} }
     versionOfPlugin?: string
     updateURL?: string
+    risuBardAutoContext?: boolean
     enabled?: boolean
     allowedIPC?: string[]
 }
@@ -413,7 +416,7 @@ export async function importPlugin(code:string|null = null, argu:{
         }
 
         if(oldPluginIndex !== -1){
-            db.plugins[oldPluginIndex] = pluginData;
+            db.plugins[oldPluginIndex] = preservePluginBardWikiSetting(db.plugins[oldPluginIndex], pluginData);
         }
         else if(!isUpdate || argu.isHotReload){
             db.plugins.push(pluginData)

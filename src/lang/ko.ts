@@ -1,6 +1,8 @@
 import { helpKo } from "./help.ko";
 
 export const languageKorean = {
+    pluginBardWikiAutoContext: "BardWiki 문맥 자동 제공",
+    pluginBardWikiAutoContextHelp: "기본값은 꺼짐입니다. 켜면 이 플러그인이 캐릭터·채팅을 조회할 때 BardWiki 문맥을 추가하며, 검색 대기가 발생할 수 있습니다. 꺼도 플러그인의 명시적인 BardWiki 요청은 가능합니다.",
   cbsEditor: {
         logic: { OR: '또는', AND: '그리고', NOT: '아님' },
     on: '켜짐', off: '꺼짐',

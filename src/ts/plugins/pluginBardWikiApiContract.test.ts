@@ -12,6 +12,14 @@ const declarations = readFileSync(
 )
 
 describe('BardWiki Plugin API contract', () => {
+    it('gates all automatic read projections on live host settings without gating explicit requests', () => {
+        expect(implementation).toContain('pluginReceivesBardWiki(DBState.db.plugins ?? [], plugin.name)')
+        expect(implementation.match(/autoContextEnabled\(\)/g)).toHaveLength(4)
+        const explicit = implementation.slice(implementation.indexOf('_getBardWikiContext: async'), implementation.indexOf('_getBardWikiDocuments: async'))
+        expect(explicit).toContain('buildBardWikiPluginContext')
+        expect(explicit).not.toContain('autoContextEnabled')
+        expect(implementation).not.toContain('reconcilePluginSnapshot')
+    })
     it('virtualizes legacy memory getters and sanitizes matching write paths', () => {
         expect(implementation).toContain('decorateBardWikiCharacterForPlugin')
         expect(implementation).toContain('decorateBardWikiChatForPlugin')

@@ -1,6 +1,8 @@
 import { helpEn } from "./help.en";
 
 export const languageEnglish = {
+    pluginBardWikiAutoContext: "Automatically provide BardWiki context",
+    pluginBardWikiAutoContextHelp: "Off by default. Adds BardWiki context to this plugin’s character and chat reads. Enabling may add search latency. Explicit BardWiki requests still work when off.",
     cbsEditor: {
         logic: { OR: 'OR', AND: 'AND', NOT: 'NOT' },
         on: 'On', off: 'Off',

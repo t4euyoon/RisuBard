@@ -166,20 +166,25 @@ export function selectBardWikiPluginRecentMessages<
     responseMessageCount: number,
     excludeHistoricalUserMessages: boolean
 ): T[] {
-    let start = 0
-    for (let index = messages.length - 1; index >= 0; index -= 1) {
-        if (messages[index].disabled === 'allBefore') {
-            start = index + 1
-            break
-        }
+    if (!Number.isSafeInteger(responseMessageCount) || responseMessageCount < 1) {
+        throw new Error('Narrative working-message limit must be positive')
     }
-    const usable = messages.slice(start).filter((message) =>
-        message.disabled !== true
-        && message.disabled !== 'allBefore'
-        && message.isComment !== true
-        && typeof message.data === 'string'
-        && message.data.trim().length > 0
-    )
+    // Only visit the requested tail. Plugin polling used to filter and map the
+    // entire history, even when the compatibility context was already cached.
+    const usable: T[] = []
+    let assistants = 0
+    for (let index = messages.length - 1; index >= 0; index -= 1) {
+        const message = messages[index]
+        if (message.disabled === 'allBefore') break
+        if (message.disabled === true || message.isComment === true
+            || typeof message.data !== 'string' || !message.data.trim()) continue
+        if (message.role === 'char' || message.role === 'assistant') {
+            assistants += 1
+            if (assistants > responseMessageCount) break
+        }
+        usable.push(message)
+    }
+    usable.reverse()
     return selectNarrativeWorkingMessages(
         usable,
         responseMessageCount,
