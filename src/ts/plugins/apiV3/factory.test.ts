@@ -2,6 +2,70 @@ import { afterEach, describe, expect, test, vi } from 'vitest'
 import { SandboxHost } from './factory'
 
 describe('API v3 plugin sandbox document', () => {
+    test('records unfinished, successful and failed host calls without retaining payloads', async () => {
+        vi.stubGlobal('ImageBitmap', class ImageBitmap {})
+        let finish: (value: string) => void = () => {}
+        const iframe = document.createElement('iframe')
+        document.body.appendChild(iframe)
+        const host = new SandboxHost({
+            slow: () => new Promise<string>(resolve => { finish = resolve }),
+            broken: () => { throw new Error('private-error-content') },
+        })
+        const stop = host.run(iframe, '')
+        try {
+            const call = (method: string) => window.dispatchEvent(new MessageEvent('message', {
+                source: iframe.contentWindow,
+                data: { type: 'CALL_ROOT', reqId: method, method, args: ['private-request-content'] },
+            }))
+            call('slow')
+            expect(host.getDiagnostics().calls[0].state).toBe('running')
+            call('broken')
+            await vi.waitFor(() => expect(host.getDiagnostics().calls[1]).toMatchObject({ failed: true, state: 'posted' }))
+            finish('private-result-content')
+            await vi.waitFor(() => expect(host.getDiagnostics().calls[0]).toMatchObject({ failed: false, state: 'posted' }))
+            expect(JSON.stringify(host.getDiagnostics())).not.toContain('private-')
+        } finally { stop() }
+    })
+
+    test('diagnostic ping ignores other frames and accepts only safe counters', async () => {
+        const iframe = document.createElement('iframe')
+        const other = document.createElement('iframe')
+        document.body.append(iframe, other)
+        const host = new SandboxHost({})
+        const stop = host.run(iframe, '')
+        const post = vi.spyOn(iframe.contentWindow!, 'postMessage')
+        try {
+            const ping = host.pingDiagnostics()
+            const request = post.mock.calls[0][0] as { reqId: string }
+            const response = { type: 'DIAGNOSTIC_PONG', reqId: request.reqId,
+                result: { pendingRequests: 3, remoteRefs: 10, callbacks: 2, secret: 'private' } }
+            const settled = vi.fn()
+            void ping.then(settled)
+            window.dispatchEvent(new MessageEvent('message', { source: other.contentWindow, data: response }))
+            await Promise.resolve()
+            expect(settled).not.toHaveBeenCalled()
+            window.dispatchEvent(new MessageEvent('message', { source: iframe.contentWindow, data: response }))
+            expect(await ping).toEqual({ status: 'responsive', pendingRequests: 3, remoteRefs: 10, callbacks: 2 })
+        } finally { stop() }
+    })
+
+    test('diagnostics still return when the guest is silent and clean up on termination', async () => {
+        vi.useFakeTimers()
+        const host = new SandboxHost({})
+        const iframe = document.createElement('iframe')
+        document.body.appendChild(iframe)
+        const stop = host.run(iframe, '')
+        try {
+            const ping = host.pingDiagnostics()
+            await vi.advanceTimersByTimeAsync(2000)
+            expect(await ping).toEqual({ status: 'timeout' })
+            const pending = host.pingDiagnostics()
+            stop()
+            expect(await pending).toEqual({ status: 'terminated' })
+            expect(vi.getTimerCount()).toBe(0)
+        } finally { stop(); vi.useRealTimers() }
+    })
+
     test('creates distinct CSP nonces over HTTP without crypto.randomUUID', () => {
         const getRandomValues = vi.fn(crypto.getRandomValues.bind(crypto))
         vi.stubGlobal('crypto', { getRandomValues })

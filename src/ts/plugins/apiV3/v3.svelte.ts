@@ -79,6 +79,10 @@ class SafeElement {
     #element: HTMLElement;
     __classType = 'REMOTE_REQUIRED' as const;
 
+    public getDiagnosticTarget() {
+        return { tag: this.#element.tagName, connected: this.#element.isConnected };
+    }
+
     constructor(element: HTMLElement) {
         if(element.getAttribute('freezed')){
             throw new Error("This element cannot be accessed by SafeELement")
@@ -1736,4 +1740,12 @@ globalThis.__debugV3Plugin = (code: string|Function, pluginName: string = '') =>
         throw new Error(`Plugin ${pluginName} not found.`);
     }
     return instance.host.executeInIframe(code);
+};
+
+// Uses the host recorder even if the guest has stopped responding. No eval/CSP bypass.
+globalThis.__debugV3PluginState = async (pluginName: string = 'Asset Maid') => {
+    const instance = v3PluginInstances.find(p => p.name === pluginName);
+    if (!instance) return { status: 'not-loaded' };
+    const guest = await instance.host.pingDiagnostics();
+    return { guest, host: instance.host.getDiagnostics() };
 };

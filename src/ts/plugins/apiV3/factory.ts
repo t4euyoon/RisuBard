@@ -5,7 +5,9 @@ type MsgType =
     | 'CALLBACK_RETURN'
     | 'RESPONSE'
     | 'RELEASE_INSTANCE'
-    | 'ABORT_SIGNAL';
+    | 'ABORT_SIGNAL'
+    | 'DIAGNOSTIC_PING'
+    | 'DIAGNOSTIC_PONG';
 
 interface RpcMessage {
     type: MsgType;
@@ -283,6 +285,15 @@ await (async function() {
         const data = event.data;
         if (!data) return;
 
+        if (data.type === 'DIAGNOSTIC_PING' && data.reqId) {
+            send({ type: 'DIAGNOSTIC_PONG', reqId: data.reqId, result: {
+                pendingRequests: pendingRequests.size,
+                remoteRefs: proxyRefRegistry.size,
+                callbacks: callbackRegistry.size
+            }});
+            return;
+        }
+
 
         if (data.type === 'RESPONSE' && data.reqId) {
             const req = pendingRequests.get(data.reqId);
@@ -441,6 +452,55 @@ await (async function() {
 `;
 
 export class SandboxHost {
+    private diagnosticStartedAt = Date.now();
+    private diagnosticCalls: Array<{
+        method: string; kind: string; startedMs: number; finishedMs?: number;
+        state: 'running' | 'returned' | 'failed' | 'posted' | 'post-failed';
+        failed?: boolean; target?: { tag: string; connected: boolean };
+    }> = [];
+    private diagnosticLoads = 0;
+    private diagnosticLastMessageAt: number | null = null;
+    private diagnosticLoadListener = () => { this.diagnosticLoads++; };
+    private diagnosticPings = new Map<string, (value: unknown) => void>();
+
+    // Bounded metadata only: never retain API arguments, results, or error text.
+    public getDiagnostics() {
+        return {
+            startedAt: this.diagnosticStartedAt,
+            elapsedMs: Date.now() - this.diagnosticStartedAt,
+            lastMessageMs: this.diagnosticLastMessageAt === null ? null
+                : this.diagnosticLastMessageAt - this.diagnosticStartedAt,
+            frame: {
+                connected: this.iframe?.isConnected ?? false,
+                hasWindow: Boolean(this.iframe?.contentWindow),
+                loads: this.diagnosticLoads,
+                display: this.iframe ? getComputedStyle(this.iframe).display : null,
+            },
+            remoteRefs: this.instanceRegistry.size,
+            pendingCallbacks: this.pendingCallbacks.size,
+            activeStreams: this.activeStreamCleanups.size,
+            calls: this.diagnosticCalls.map(call => ({ ...call })),
+        };
+    }
+
+    public pingDiagnostics(): Promise<unknown> {
+        const id = 'diagnostic_' + crypto.getRandomValues(new Uint32Array(4)).join('_');
+        return new Promise(resolve => {
+            const timer = setTimeout(() => finish({ status: 'timeout' }), 2000);
+            const finish = (value: unknown) => {
+                clearTimeout(timer);
+                this.diagnosticPings.delete(id);
+                resolve(value);
+            };
+            this.diagnosticPings.set(id, finish);
+            try {
+                if (!this.iframe?.contentWindow) return finish({ status: 'missing-frame' });
+                this.iframe.contentWindow.postMessage({ type: 'DIAGNOSTIC_PING', reqId: id }, '*');
+            } catch {
+                finish({ status: 'post-failed' });
+            }
+        });
+    }
     private iframe: HTMLIFrameElement;
     private apiFactory: any;
     // getRandomValues is available on LAN HTTP origins, unlike randomUUID.
@@ -809,10 +869,24 @@ export class SandboxHost {
         this.iframe.setAttribute('allow', 'screen-wake-lock')
 
         this.iframe.setAttribute('csp', this.csp);
+        this.iframe.addEventListener('load', this.diagnosticLoadListener);
 
         const messageHandler = async (event: MessageEvent) => {
             if (event.source !== this.iframe.contentWindow) return;
             const data = event.data as RpcMessage;
+            if (!data || typeof data !== 'object') return;
+            this.diagnosticLastMessageAt = Date.now();
+
+            if (data.type === 'DIAGNOSTIC_PONG') {
+                const counters = data.result;
+                this.diagnosticPings.get(data.reqId!)?.({
+                    status: 'responsive',
+                    ...Object.fromEntries(['pendingRequests', 'remoteRefs', 'callbacks'].map(key =>
+                        [key, Number.isSafeInteger(counters?.[key]) ? counters[key] : null]
+                    )),
+                });
+                return;
+            }
 
 
             if (data.type === 'CALLBACK_RETURN') {
@@ -848,6 +922,12 @@ export class SandboxHost {
 
 
             if (data.type === 'CALL_ROOT' || data.type === 'CALL_INSTANCE') {
+                const diagnostic: (typeof this.diagnosticCalls)[number] = {
+                    method: String(data.method ?? '').slice(0, 80), kind: data.type,
+                    startedMs: Date.now() - this.diagnosticStartedAt, state: 'running',
+                };
+                this.diagnosticCalls.push(diagnostic);
+                if (this.diagnosticCalls.length > 128) this.diagnosticCalls.shift();
                 const response: RpcMessage = { type: 'RESPONSE', reqId: data.reqId };
                 const usedAbortIds: string[] = [];
                 let transferables: Transferable[] = [];
@@ -873,6 +953,9 @@ export class SandboxHost {
                     } else {
                         const instance = this.instanceRegistry.get(data.id!);
                         if (!instance) throw new Error("Instance not found or released");
+                        if (typeof instance.getDiagnosticTarget === 'function') {
+                            diagnostic.target = instance.getDiagnosticTarget();
+                        }
                         if (typeof instance[data.method!] !== 'function') throw new Error(`Method ${data.method} missing on instance`);
                         result = await instance[data.method!](...args);
                     }
@@ -890,13 +973,18 @@ export class SandboxHost {
                     response.error = err?.message || String(err || "Host execution error");
                 } finally {
                     for (const id of usedAbortIds) this.abortControllers.delete(id);
+                    diagnostic.finishedMs = Date.now() - this.diagnosticStartedAt;
+                    diagnostic.failed = Boolean(response.error);
+                    diagnostic.state = response.error ? 'failed' : 'returned';
                 }
 
                 console.log("Original request:", data);
                 console.log('Original response:', response, transferables);
                 try {
                     this.iframe.contentWindow?.postMessage(response, '*', transferables);
+                    diagnostic.state = this.iframe.contentWindow ? 'posted' : 'post-failed';
                 } catch (error) {
+                    diagnostic.state = 'post-failed';
                     rollbackStreams();
                     try {
                         this.iframe.contentWindow?.postMessage({
@@ -955,8 +1043,10 @@ export class SandboxHost {
             this.messageHandlerRef = null;
         }
         if (this.iframe) {
+            this.iframe.removeEventListener('load', this.diagnosticLoadListener);
             this.iframe.remove();
         }
+        for (const finish of [...this.diagnosticPings.values()]) finish({ status: 'terminated' });
         this.closeActiveStreams();
         this.instanceRegistry.clear();
         this.pendingCallbacks.clear();
