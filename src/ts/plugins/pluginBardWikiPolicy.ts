@@ -8,7 +8,7 @@ export function pluginReceivesBardWiki(plugins: readonly PluginBardWikiSetting[]
     return plugins.find(plugin => plugin.name === name)?.risuBardAutoContext === true
 }
 
-export function preservePluginBardWikiSetting<T extends PluginBardWikiSetting>(previous: PluginBardWikiSetting | undefined, incoming: T): T {
+export function preservePluginBardWikiSetting<T extends PluginBardWikiSetting>(previous: PluginBardWikiSetting | undefined, incoming: T): T & { risuBardAutoContext: boolean } {
     return { ...incoming, risuBardAutoContext: previous?.risuBardAutoContext === true }
 }
 
